@@ -21,7 +21,7 @@ const ruleOptionsEnable = {
   手动选择: true, // 是否启用手动选择策略组
   自动选择: true, // 是否启用自动选择策略组
   负载均衡: true, // 是否启用负载均衡策略组
-  Fallback: true, // 是否启用各地区独立的故障转移策略组
+  Fallback: false, // 是否启用各地区独立的故障转移策略组
 
   // 以下为分流策略配置
   FCM: true, // GoogleFCM服务
@@ -307,7 +307,7 @@ const baseRuleProviders = {
 
 // 策略组公共配置
 const groupBaseOption = {
-  interval: 600,
+  interval: 120,
   timeout: 3000,
   url: 'https://g.cn/generate_204',
   lazy: true,
@@ -889,7 +889,7 @@ function createRegionGroup(
   name,
   icon,
   proxies,
-  enableFallback = false,
+  enableFallback = true,
 ) {
   const generateRegionAutoSelectEnabled =
     ruleOptionsEnable.生成地区自动选择组;
