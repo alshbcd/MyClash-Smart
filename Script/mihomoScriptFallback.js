@@ -348,7 +348,7 @@ const fallbackBaseOption = {
   interval: 10,
   timeout: 5000,
   'max-failed-times': 2,
-  lazy: ture,
+  lazy: true,
   'exclude-type': 'DIRECT',
   icon: 'https://fastly.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Available_1.png',
 };
