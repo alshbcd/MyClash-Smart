@@ -351,6 +351,7 @@ const fallbackBaseOption = {
   lazy: true,
   'exclude-type': 'DIRECT',
   icon: 'https://fastly.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Available_1.png',
+  hidden: true,
 };
 
 // 定义基础策略组
