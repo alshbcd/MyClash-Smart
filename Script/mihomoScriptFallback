@@ -889,7 +889,7 @@ function createRegionGroup(
   name,
   icon,
   proxies,
-  enableFallback = false,
+  enableFallback = true,
 ) {
   const generateRegionAutoSelectEnabled =
     ruleOptionsEnable.生成地区自动选择组;
