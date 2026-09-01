@@ -295,7 +295,7 @@ const baseRuleProviders = {
 
 // 策略组公共配置
 const groupBaseOption = {
-  interval: 600,
+  interval: 120,
   timeout: 3000,
   url: 'https://g.cn/generate_204',
   lazy: true,
