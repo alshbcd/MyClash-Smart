@@ -335,9 +335,20 @@ const loadBalanceBaseOption = {
 };
 
 // fallback策略组通用配置：按节点顺序自动切换到第一个可用节点
+// const fallbackBaseOption = {
+//   ...groupBaseOption,
+//   type: 'fallback',
+//   'exclude-type': 'DIRECT',
+//   icon: 'https://fastly.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Available_1.png',
+// };
+
 const fallbackBaseOption = {
   ...groupBaseOption,
   type: 'fallback',
+  interval: 5,
+  timeout: 2000,
+  'max-failed-times': 2,
+  lazy: false,
   'exclude-type': 'DIRECT',
   icon: 'https://fastly.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Available_1.png',
 };
