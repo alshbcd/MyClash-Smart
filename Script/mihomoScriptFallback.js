@@ -346,7 +346,7 @@ const fallbackBaseOption = {
   ...groupBaseOption,
   type: 'fallback',
   interval: 10,
-  timeout: 2000,
+  timeout: 5000,
   'max-failed-times': 2,
   lazy: false,
   'exclude-type': 'DIRECT',
