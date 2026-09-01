@@ -345,10 +345,10 @@ const loadBalanceBaseOption = {
 const fallbackBaseOption = {
   ...groupBaseOption,
   type: 'fallback',
-  interval: 30,
+  interval: 10,
   timeout: 5000,
   'max-failed-times': 2,
-  lazy: false,
+  lazy: ture,
   'exclude-type': 'DIRECT',
   icon: 'https://fastly.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Available_1.png',
 };
