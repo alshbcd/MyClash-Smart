@@ -345,7 +345,7 @@ const loadBalanceBaseOption = {
 const fallbackBaseOption = {
   ...groupBaseOption,
   type: 'fallback',
-  interval: 10,
+  interval: 30,
   timeout: 5000,
   'max-failed-times': 2,
   lazy: true,
