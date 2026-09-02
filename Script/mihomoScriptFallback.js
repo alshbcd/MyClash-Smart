@@ -213,7 +213,7 @@ const baseRuleProviders = {
     ...ruleProviderCommonIpcidr,
     url: 'https://fastly.jsdelivr.net/gh/appshubcc/bett-rules@meta/geo/geoip/private.mrs',
     path: './ruleset/private_ip.mrs',
-    'path-in-bundle': 'geo/geoip/private_ip.mrs',
+    'path-in-bundle': 'geo/geoip/private.mrs',
   },
 
   games_cn: {
