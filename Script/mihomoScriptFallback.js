@@ -903,7 +903,7 @@ function createRegionGroup(
     ruleOptionsEnable.隐藏地区手动选择组;
 
   const fallbackEnabled =
-    ruleOptionsEnable.Fallback &&
+    ruleOptionsEnable.故障转移 &&
     enableFallback &&
     proxies.length > 0;
 
