@@ -907,7 +907,7 @@ function createRegionGroup(
     enableFallback &&
     proxies.length > 0;
 
-  const fallbackName = `${name}-Fallback`;
+  const fallbackName = `${name}-故障转移`;
 
   const fallbackGroup = fallbackEnabled
     ? {
