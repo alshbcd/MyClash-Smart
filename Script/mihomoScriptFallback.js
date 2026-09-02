@@ -14,7 +14,7 @@ const ruleOptionsEnable = {
   手动选择: true, // 是否启用手动选择策略组
   自动选择: true, // 是否启用自动选择策略组
   负载均衡: true, // 是否启用负载均衡策略组
-  Fallback: true, // 是否启用各地区独立的故障转移策略组
+  故障转移: true, // 是否启用各地区独立的故障转移策略组
 
   // 以下为分流策略配置
   FCM: true, // GoogleFCM服务
@@ -345,10 +345,10 @@ const loadBalanceBaseOption = {
 const fallbackBaseOption = {
   ...groupBaseOption,
   type: 'fallback',
-  interval: 30,
-  timeout: 5000,
+  interval: 10,
+  timeout: 3000,
   'max-failed-times': 2,
-  lazy: true,
+  lazy: false,
   'exclude-type': 'DIRECT',
   icon: 'https://fastly.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Available_1.png',
   hidden: true,
