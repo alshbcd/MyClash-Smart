@@ -727,7 +727,7 @@ const flagRegex = /[\u{1F1E6}-\u{1F1FF}]{2}/u;
 function normalizeProxyName(proxy) {
   const originalName = proxy.name;
 
-  const flag = originalName.match(flagRegex);
+  const flag = originalName.match(flagRegex)?.[0];;
 
   const nameWithoutFlag = (flag ? originalName.replace(flag, '') : originalName)
     .replace(/\s+/g, ' ')
@@ -1358,7 +1358,7 @@ const commonDnsList = [
   '2a02:6b8::feed:0ff',
   '2a02:6b8:0:1::feed:0ff',
   '2610:a1:1018::1',
-  '2610:a1:1019::53',
+  '2610:a1:1019::1',
 
   // 关键词（国内）
   'alidns',
