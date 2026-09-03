@@ -727,7 +727,7 @@ const flagRegex = /[\u{1F1E6}-\u{1F1FF}]{2}/u;
 function normalizeProxyName(proxy) {
   const originalName = proxy.name;
 
-  const flag = originalName.match(flagRegex)?.[0];;
+  const flag = originalName.match(flagRegex)?.[0];
 
   const nameWithoutFlag = (flag ? originalName.replace(flag, '') : originalName)
     .replace(/\s+/g, ' ')
