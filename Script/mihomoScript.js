@@ -1265,7 +1265,7 @@ function buildFunctionalGroups(
       ...directProxies.map((p) => p.name),
     ],
     url: 'https://connectivitycheck.platform.hicloud.com/generate_204',
-    icon: 'https://fastly.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/China_Map.png',
+    icon: 'https://fastly.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/China.png',
     hidden: hideManualSelectGroupEnabled,
   };
 
