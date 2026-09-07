@@ -21,6 +21,7 @@ const ruleOptionsEnable = {
   手动选择: true, // 是否启用手动选择策略组
   自动选择: true, // 是否启用自动选择策略组
   负载均衡: true, // 是否启用负载均衡策略组
+  故障转移: true, // 是否启用各地区独立的故障转移策略组
 
   // 以下为分流策略配置
   FCM: true, // GoogleFCM服务
@@ -331,6 +332,17 @@ const loadBalanceBaseOption = {
   strategy: 'sticky-sessions',
   'exclude-type': 'DIRECT',
   icon: 'https://fastly.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Round_Robin.png',
+  hidden: true,
+};
+const fallbackBaseOption = {
+  ...groupBaseOption,
+  type: 'fallback',
+  interval: 10,
+  timeout: 3000,
+  'max-failed-times': 2,
+  lazy: false,
+  'exclude-type': 'DIRECT',
+  icon: 'https://fastly.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Available_1.png',
   hidden: true,
 };
 
@@ -836,34 +848,87 @@ function filterAndNormalizeProxies(config) {
 
 /**
  * 构建地区策略组，可附带自动选择组
+ * enableFallback=true 时，仅对实际地区组生成独立 Fallback。
  */
-function createRegionGroup(name, icon, proxies) {
+function createRegionGroup(name, icon, proxies, enableFallback = true,) {
   const generateRegionAutoSelectEnabled = ruleOptionsEnable.生成地区自动选择组;
   const hideManualSelectGroupEnabled = ruleOptionsEnable.隐藏地区手动选择组;
 
+
+  const fallbackEnabled =
+    ruleOptionsEnable.故障转移 &&
+    enableFallback &&
+    proxies.length > 0;
+
+  const fallbackName = `${name}-故障转移`;
+  const fallbackGroup = fallbackEnabled
+    ? {
+        ...fallbackBaseOption,
+        name: fallbackName,
+        proxies: [...proxies],
+      }
+    : null;
+
   if (generateRegionAutoSelectEnabled) {
     const urlTestName = `${name}-自动选择`;
+    //	return [
+//      {
+//        ...urlTestBaseOption,
+//        name: urlTestName,
+//        proxies,
+//      },
+//      {
+//        ...selectBaseOption,
+//        name,
+//        icon,
+//        proxies: [...proxies, urlTestName],
+//        hidden: hideManualSelectGroupEnabled,
+//      },
+//    ];
+
     return [
+      ...(fallbackGroup ? [fallbackGroup] : []),
+
       {
         ...urlTestBaseOption,
         name: urlTestName,
         proxies,
       },
+
       {
         ...selectBaseOption,
         name,
         icon,
-        proxies: [...proxies, urlTestName],
+        proxies: [
+          ...proxies,
+          urlTestName,
+          ...(fallbackGroup ? [fallbackName] : []),
+        ],
         hidden: hideManualSelectGroupEnabled,
       },
     ];
   }
+ // return [
+   // {
+     // ...selectBaseOption,
+     // name,
+     // icon,
+     // proxies,
+     // hidden: hideManualSelectGroupEnabled,
+    //},
+  // ];
+
   return [
+    ...(fallbackGroup ? [fallbackGroup] : []),
+
     {
       ...selectBaseOption,
       name,
       icon,
-      proxies,
+      proxies: [
+        ...proxies,
+        ...(fallbackGroup ? [fallbackName] : []),
+      ],
       hidden: hideManualSelectGroupEnabled,
     },
   ];
