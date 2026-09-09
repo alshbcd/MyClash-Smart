@@ -150,6 +150,35 @@ function runIntegrationTests(h, api, meta, fx, loadScript, scriptFile) {
       'jp1.example.com': 'https://private-ns.example-dns.com/dns-query',
     });
   });
+  h.test('仅匹配部分节点域名时不压缩策略，避免后缀规则扩大匹配范围', () => {
+    const cfg = fx.minimalSubscription();
+    cfg.dns = {
+      'proxy-server-nameserver-policy': {
+        'b.example.com': ['https://private.example-dns.com/dns-query'],
+        'a.example.com': ['https://private.example-dns.com/dns-query'],
+      },
+    };
+    const out = api.main(cfg);
+    h.assertDeep(out.dns['proxy-server-nameserver-policy'], {
+      'b.example.com': ['https://private.example-dns.com/dns-query'],
+      'a.example.com': ['https://private.example-dns.com/dns-query'],
+    });
+  });
+  h.test('策略域名与节点域名完整一致时按忽略顺序的集合比较后压缩', () => {
+    const cfg = fx.minimalSubscription();
+    cfg.dns = {
+      'proxy-server-nameserver-policy': {
+        'd.example.com': ['https://private.example-dns.com/dns-query'],
+        'c.example.com': ['https://private.example-dns.com/dns-query'],
+        'b.example.com': ['https://private.example-dns.com/dns-query'],
+        'a.example.com': ['https://private.example-dns.com/dns-query'],
+      },
+    };
+    const out = api.main(cfg);
+    h.assertDeep(out.dns['proxy-server-nameserver-policy'], {
+      '+.example.com': ['https://private.example-dns.com/dns-query'],
+    });
+  });
   h.test('节点 hosts 映射改写为 server，不再复制 hosts', () => {
     const out = api.main(fx.typicalSubscription());
     const p = out.proxies.find((x) => x.name === '🇭🇰 香港 01 | 中转');
