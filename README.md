@@ -176,3 +176,7 @@ https://raw.githubusercontent.com/AIsouler/MyClash/main/Config/mihomoConfigLite.
 - [217heidai/adblockfilters](https://github.com/217heidai/adblockfilters)
 
 - [Koolson/Qure](https://github.com/Koolson/Qure)
+
+## Star History
+
+[![Star History Chart](https://api.star-history.com/chart?repos=aisouler/myclash&type=date&legend=top-left)](https://www.star-history.com/?repos=aisouler%2Fmyclash&type=date&legend=top-left)
