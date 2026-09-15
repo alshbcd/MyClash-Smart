@@ -2,7 +2,7 @@
  * mihomo配置覆写脚本（全量版）
  * 作者：AIsouler
  * 源仓库：https://github.com/AIsouler/MyClash
- * 脚本链接：https://raw.githubusercontent.com/AIsouler/MyClash/main/Script/mihomoScript.js
+ * 脚本链接：https://raw.githubusercontent.com/alshbcd/MyClash-Smart/refs/heads/main/Script/mihomoScript.js
  * 友情推荐，非常好用、省电且内存占用低的代理软件：https://github.com/appshubcc/Bettbox
  */
 
@@ -21,6 +21,7 @@ const ruleOptionsEnable = {
   手动选择: true, // 是否启用手动选择策略组
   自动选择: true, // 是否启用自动选择策略组
   负载均衡: true, // 是否启用负载均衡策略组
+  故障转移: true, // 是否启用各地区独立的故障转移策略组
 
   // 以下为分流策略配置
   FCM: true, // GoogleFCM服务
@@ -318,8 +319,22 @@ const urlTestBaseOption = {
   ...groupBaseOption,
   type: 'url-test',
   tolerance: 50,
+  interval: 180,
+  timeout: 3000,
   'exclude-type': 'DIRECT',
   icon: 'https://fastly.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Auto.png',
+  hidden: true,
+};
+
+const fallbackBaseOption = {
+  ...groupBaseOption,
+  type: 'fallback',
+  interval: 5,
+  timeout: 3000,
+  'max-failed-times': 1,
+  lazy: true,
+  'exclude-type': 'DIRECT',
+  icon: 'https://fastly.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Available_1.png',
   hidden: true,
 };
 
@@ -868,36 +883,132 @@ function filterAndNormalizeProxies(config) {
 /**
  * 构建地区策略组，可附带自动选择组
  */
-function createRegionGroup(name, icon, proxies) {
-  const generateRegionAutoSelectEnabled = ruleOptionsEnable.生成地区自动选择组;
-  const hideManualSelectGroupEnabled = ruleOptionsEnable.隐藏地区手动选择组;
+//function createRegionGroup(name, icon, proxies) {
+//  const generateRegionAutoSelectEnabled = ruleOptionsEnable.生成地区自动选择组;
+//  const hideManualSelectGroupEnabled = ruleOptionsEnable.隐藏地区手动选择组;
+
+//  if (generateRegionAutoSelectEnabled) {
+//    const urlTestName = `${name}-自动选择`;
+//    return [
+//      {
+//        ...urlTestBaseOption,
+//        name: urlTestName,
+//        proxies,
+//      },
+//      {
+//        ...selectBaseOption,
+//        name,
+//        icon,
+//        proxies: [...proxies, urlTestName],
+//        hidden: hideManualSelectGroupEnabled,
+//      },
+//    ];
+//  }
+//  return [
+//    {
+//      ...selectBaseOption,
+//      name,
+//      icon,
+//      proxies,
+//      hidden: hideManualSelectGroupEnabled,
+//    },
+//  ];
+//}
+
+/**
+ * 构建地区策略组
+ *
+ * 结构：
+ * 地区
+ * ├─ 地区-自动选择
+ * ├─ 地区-故障转移
+ * └─ 地区节点
+ *
+ * 自动选择与故障转移相互独立：
+ * - 自动选择：只负责从当前地区节点中选择延迟较低的节点
+ * - 故障转移：只负责在当前地区节点发生故障时自动切换
+ *
+ * enableFallback=true 时，仅对实际地区组生成独立 Fallback。
+ */
+function createRegionGroup(name, icon, proxies, enableFallback = true) {
+  const generateRegionAutoSelectEnabled =
+    ruleOptionsEnable.生成地区自动选择组;
+
+  const hideManualSelectGroupEnabled =
+    ruleOptionsEnable.隐藏地区手动选择组;
+
+  // 防止空节点组生成无意义的策略组
+  if (!proxies || proxies.length === 0) {
+    return [];
+  }
+
+  // 当前地区是否启用 Fallback
+  const fallbackEnabled =
+    ruleOptionsEnable.故障转移 &&
+    enableFallback &&
+    proxies.length > 0;
+
+  const fallbackName = `${name}-故障转移`;
+
+  // 独立的地区 Fallback
+  const fallbackGroup = fallbackEnabled
+    ? {
+        ...fallbackBaseOption,
+        name: fallbackName,
+        proxies: [...proxies],
+      }
+    : null;
+
+  const groups = [];
+
+  // --------------------------------------------------
+  // 1. Fallback
+  // --------------------------------------------------
+  if (fallbackGroup) {
+    groups.push(fallbackGroup);
+  }
+
+  // --------------------------------------------------
+  // 2. 自动选择
+  // --------------------------------------------------
+  let urlTestName = null;
 
   if (generateRegionAutoSelectEnabled) {
-    const urlTestName = `${name}-自动选择`;
-    return [
-      {
-        ...urlTestBaseOption,
-        name: urlTestName,
-        proxies,
-      },
-      {
-        ...selectBaseOption,
-        name,
-        icon,
-        proxies: [...proxies, urlTestName],
-        hidden: hideManualSelectGroupEnabled,
-      },
-    ];
+    urlTestName = `${name}-自动选择`;
+
+    groups.push({
+      ...urlTestBaseOption,
+      name: urlTestName,
+
+      // 自动选择只测试真实节点
+      // 不把 Fallback 自身加入候选
+      proxies: [...proxies],
+    });
   }
-  return [
-    {
-      ...selectBaseOption,
-      name,
-      icon,
-      proxies,
-      hidden: hideManualSelectGroupEnabled,
-    },
+
+  // --------------------------------------------------
+  // 3. 地区手动选择组
+  // --------------------------------------------------
+  const manualProxies = [
+    // 自动选择放最前面
+    ...(urlTestName ? [urlTestName] : []),
+
+    // Fallback 放第二位
+    ...(fallbackGroup ? [fallbackName] : []),
+
+    // 最后才是实际节点
+    ...proxies,
   ];
+
+  groups.push({
+    ...selectBaseOption,
+    name,
+    icon,
+    proxies: manualProxies,
+    hidden: hideManualSelectGroupEnabled,
+  });
+
+  return groups;
 }
 
 /**
