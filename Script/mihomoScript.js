@@ -1151,6 +1151,10 @@ function buildFunctionalGroups(filteredProxies, generatedRegionGroups, customize
   const groupNamesOfSelect = generatedRegionGroups.filter((g) => g.type === 'select').map((g) => g.name);
   const baseGroupNames = baseGroups.filter((g) => ruleOptionsEnable[g.name]).map((g) => g.name);
   const customGroupNames = customGroup ? [customGroup.name] : [];
+  // 默认代理的全局故障转移
+  const defaultFallbackEnabled = ruleOptionsEnable.故障转移 && allProxiesNames.length > 0;
+  const defaultFallbackName = '默认代理-故障转移';
+  const defaultFallbackGroup = defaultFallbackEnabled ? { ...fallbackBaseOption, name: defaultFallbackName, proxies: [...allProxiesNames], } : null;
 
   const chainGroup =
     chainEnabled && customGroup
@@ -1163,12 +1167,25 @@ function buildFunctionalGroups(filteredProxies, generatedRegionGroups, customize
       : null;
 
   if (minimalModeEnabled) {
-    const defaultGroup = {
-      ...selectBaseOption,
-      name: '默认代理',
-      proxies: allProxiesNames,
-      icon: `${iconBaseUrl}Proxy.svg`,
-    };
+   const defaultFallbackGroup = ruleOptionsEnable.故障转移
+  ? {
+      ...fallbackBaseOption,
+      name: '默认代理-故障转移',
+      proxies: [...allProxiesNames],
+    }
+  : null;
+
+const defaultGroup = {
+  ...selectBaseOption,
+  name: '默认代理',
+  proxies: [
+    ...(defaultFallbackGroup ? [defaultFallbackGroup.name] : []),
+    ...allProxiesNames,
+  ],
+  icon: `${iconBaseUrl}Proxy.svg`,
+};
+
+    
     const finalRuleProviders = { ...baseRuleProviders };
     if (!blockForeignQuicEnabled) delete finalRuleProviders.cn_additional;
     const directGroup = {
@@ -1186,7 +1203,10 @@ function buildFunctionalGroups(filteredProxies, generatedRegionGroups, customize
     };
     return {
       globalGroup,
-      functionalGroups: [defaultGroup],
+      functionalGroups: [
+  ...(defaultFallbackGroup ? [defaultFallbackGroup] : []),
+  defaultGroup,
+],
       functionalRules: [],
       finalRuleProviders,
       chainGroup,
@@ -1194,12 +1214,23 @@ function buildFunctionalGroups(filteredProxies, generatedRegionGroups, customize
     };
   }
 
-  functionalGroups.push({
-    ...selectBaseOption,
-    name: '默认代理',
-    proxies: [...groupNamesOfSelect, ...baseGroupNames, ...customGroupNames],
-    icon: `${iconBaseUrl}Proxy.svg`,
-  });
+  // 全局故障转移组
+ if (defaultFallbackGroup) {
+   functionalGroups.push(defaultFallbackGroup);
+ }
+
+  // 默认代理
+functionalGroups.push({
+  ...selectBaseOption,
+  name: '默认代理',
+  proxies: [
+    ...(defaultFallbackGroup ? [defaultFallbackName] : []),
+    ...groupNamesOfSelect,
+    ...baseGroupNames,
+    ...customGroupNames,
+  ],
+  icon: `${iconBaseUrl}Proxy.svg`,
+});
 
   const orderedServiceConfigs = [
     ...serviceConfigs.filter((svc) => svc.name === 'AdBlock'),
