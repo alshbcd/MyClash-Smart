@@ -1167,27 +1167,28 @@ function buildFunctionalGroups(filteredProxies, generatedRegionGroups, customize
       : null;
 
   if (minimalModeEnabled) {
+    const defaultAutoSelectName = '默认代理-自动选择';
+  const defaultFallbackName = '默认代理-故障转移';
 
-    // 极简模式：自动选择
-  const defaultAutoSelectName = '默认代理-自动选择';
+  const defaultAutoSelectGroup =
+    ruleOptionsEnable.自动选择 && allProxiesNames.length > 0
+      ? {
+          ...urlTestBaseOption,
+          name: defaultAutoSelectName,
+          proxies: [...allProxiesNames],
+        }
+      : null;
 
-  const defaultAutoSelectGroup = ruleOptionsEnable.自动选择
-    ? {
-        ...urlTestBaseOption,
-        name: defaultAutoSelectName,
-        proxies: [...allProxiesNames],
-      }
-    : null;
-    
-   const defaultFallbackGroup = ruleOptionsEnable.故障转移
-  ? {
-      ...fallbackBaseOption,
-      name: '默认代理-故障转移',
-      proxies: [...allProxiesNames],
-    }
-  : null;
+  const defaultFallbackGroup =
+    ruleOptionsEnable.故障转移 && allProxiesNames.length > 0
+      ? {
+          ...fallbackBaseOption,
+          name: defaultFallbackName,
+          proxies: [...allProxiesNames],
+        }
+      : null;
 
- const defaultGroup = {
+  const defaultGroup = {
     ...selectBaseOption,
     name: '默认代理',
     proxies: [
@@ -1215,17 +1216,17 @@ function buildFunctionalGroups(filteredProxies, generatedRegionGroups, customize
       icon: `${iconBaseUrl}Global.svg`,
     };
    return {
-  globalGroup,
-  functionalGroups: [
-    ...(defaultAutoSelectGroup ? [defaultAutoSelectGroup] : []),
-    ...(defaultFallbackGroup ? [defaultFallbackGroup] : []),
-    defaultGroup,
-  ],
-  functionalRules: [],
-  finalRuleProviders,
-  chainGroup,
-  directGroup,
-};
+    globalGroup,
+    functionalGroups: [
+      ...(defaultAutoSelectGroup ? [defaultAutoSelectGroup] : []),
+      ...(defaultFallbackGroup ? [defaultFallbackGroup] : []),
+      defaultGroup,
+    ],
+    functionalRules: [],
+    finalRuleProviders,
+    chainGroup,
+    directGroup,
+  };
   }
 
   // 全局故障转移组
