@@ -42,6 +42,7 @@ const ruleOptionsEnable = {
   Spotify: true, // Spotify音乐服务
   Crypto: true, // 加密货币相关服务
   PayPal: true, // PayPal支付服务
+  Patreon: true, // Patreon创作者赞助平台
   EHentai: true, // E-Hentai网站
   AdBlock: true, // 广告拦截
 
@@ -171,6 +172,12 @@ const regionDefinitions = [
     flag: '🇸🇬',
     regex: /🇸🇬|新加坡|狮城|(?<![A-Za-z])SGP?(?![A-Za-z])|singapore/i,
     icon: `${iconBaseUrl}Singapore.svg`,
+  },
+  {
+    name: '台湾省',
+    flag: '🇹🇼',
+    regex: /🇹🇼|台湾|台北|高雄|(?<![A-Za-z])TWN?(?![A-Za-z])|taiwan/i,
+    icon: `${iconBaseUrl}Taiwan.svg`,
   },
 ];
 
@@ -719,6 +726,7 @@ const serviceConfigs = [
   {
     name: 'PayPal',
     baseOption: selectBaseOption,
+    defaultSelected: '美国',
     providers: {
       paypal: {
         ...ruleProviderCommonDomain,
@@ -729,6 +737,21 @@ const serviceConfigs = [
     },
     icon: `${iconBaseUrl}PayPal.svg`,
     rules: ['RULE-SET,paypal,PayPal'],
+  },
+  {
+    name: 'Patreon',
+    baseOption: selectBaseOption,
+    defaultSelected: '香港',
+    providers: {
+      patreon: {
+        ...ruleProviderCommonDomain,
+        url: `${ruleSetBaseUrl}geosite/patreon.mrs`,
+        path: './ruleset/patreon.mrs',
+        'path-in-bundle': 'geo/geosite/patreon.mrs',
+      },
+    },
+    icon: `${iconBaseUrl}Patreon.svg`,
+    rules: ['RULE-SET,patreon,Patreon'],
   },
   {
     name: 'EHentai',
@@ -751,15 +774,15 @@ const serviceConfigs = [
     baseOption: selectBaseOption,
     reject: true,
     providers: {
-      adblockmihomolite: {
+      'category-ads': {
         ...ruleProviderCommonDomain,
-        url: 'https://fastly.jsdelivr.net/gh/217heidai/adblockfilters@main/rules/adblockmihomolite.mrs',
-        path: './ruleset/adblockmihomolite.mrs',
-        'path-in-bundle': 'geo/geosite/category-ads-all.mrs',
+        url: `${ruleSetBaseUrl}geosite/category-ads.mrs`,
+        path: './ruleset/category-ads.mrs',
+        'path-in-bundle': 'geo/geosite/category-ads.mrs',
       },
     },
     icon: `${iconBaseUrl}AdBlock.svg`,
-    rules: ['RULE-SET,adblockmihomolite,AdBlock'],
+    rules: ['RULE-SET,category-ads,AdBlock'],
   },
 ];
 
