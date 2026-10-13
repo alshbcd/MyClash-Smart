@@ -2,7 +2,7 @@
  * mihomo配置覆写脚本（全量版）
  * 作者：AIsouler
  * 源仓库：https://github.com/AIsouler/MyClash
- * 脚本链接：https://raw.githubusercontent.com/AIsouler/MyClash/main/Script/mihomoScript.js
+ * 脚本链接：https://raw.githubusercontent.com/alshbcd/MyClash-Smart/refs/heads/main/Script/mihomoScript.js
  * 友情推荐，非常好用、省电且内存占用低的代理软件：https://github.com/appshubcc/Bettbox
  */
 
@@ -21,6 +21,7 @@ const ruleOptionsEnable = {
   手动选择: true, // 是否启用手动选择策略组
   自动选择: true, // 是否启用自动选择策略组
   负载均衡: true, // 是否启用负载均衡策略组
+  故障转移: true, // 是否启用各地区独立的故障转移策略组
 
   // 以下为分流策略配置
   FCM: true, // GoogleFCM服务
@@ -57,6 +58,7 @@ const ruleOptionsEnable = {
   屏蔽国外QUIC: true, // 是否屏蔽国外QUIC流量
   代理IPV4优先: false, // 是否将订阅节点统一为 IPv4 优先（与“代理IPV6优先”同时开启时不生效）
   代理IPV6优先: false, // 是否将订阅节点统一为 IPv6 优先（与“代理IPV4优先”同时开启时不生效）
+  链式代理: false, // 是否启用链式代理（自定义节点作为落地节点，经“链式中转”策略组中转）
 };
 
 // 定义前置规则
@@ -98,9 +100,12 @@ const prefixRules = [
 // ];
 const customizeProxies = [];
 
+// 链式代理启用时，自定义节点的 dialer-proxy 引用目标
+const dialerProxyName = '链式中转';
+
 // 定义全局排除节点的正则表达式，用于排除非地区节点
 const excludeFilter =
-  /群|返利|循环|官网|客服|网站|网址|获取|订阅|流量|到期|机场|下次|版本|官址|备用|过期|已用|联系|邮箱|工单|贩卖|通知|倒卖|防止|国内|地址|频道|电报|无法|说明|提示|访问|支持|教程|关注|更新|作者|加入|超时|收藏|优惠|福利|邀请|好友|失联|选择|剩余|公益|发布|DIZTNA|通路|登录|禁止|定时|渠道|牢记|永久|余额|阁下|本站|刷新|导航|建议|重置|以下|过滤|⚠️|@|t\.me\/\+|\bexpire\b|\bhttps?:\/\/|\.com|\btraffic\b/iu;
+  /群|返利|循环|官网|客服|网站|网址|获取|订阅|流量|到期|机场|下次|版本|官址|备用|过期|已用|联系|邮箱|工单|贩卖|通知|倒卖|防止|国内|地址|频道|电报|无法|说明|使用|提示|访问|支持|教程|关注|更新|作者|加入|超时|收藏|优惠|福利|邀请|好友|失联|选择|剩余|公益|发布|DIZTNA|通路|登录|禁止|定时|渠道|牢记|永久|余额|阁下|本站|刷新|导航|建议|重置|以下|过滤|⚠️|@|t\.me\/\+|\bexpire\b|\bhttps?:\/\/|\.com|\btraffic\b/iu;
 
 // 屏蔽国外QUIC
 const blockForeignQuic = [
@@ -136,10 +141,10 @@ const directProxies = [
 ];
 
 // 图标 URL 公共前缀
-const iconBaseUrl = 'https://cdn.jsdmirror.com/gh/AIsouler/MyClash@main/Icons/svg/';
+const iconBaseUrl = 'https://fastly.jsdelivr.net/gh/AIsouler/MyClash@main/Icons/svg/';
 
 // 规则集 URL 公共前缀
-const ruleSetBaseUrl = 'https://cdn.jsdmirror.com/gh/appshubcc/bett-rules@meta/geo/';
+const ruleSetBaseUrl = 'https://fastly.jsdelivr.net/gh/appshubcc/bett-rules@meta/geo/';
 
 // 定义地区策略组
 const regionDefinitions = [
@@ -169,7 +174,7 @@ const regionDefinitions = [
     icon: `${iconBaseUrl}Singapore.svg`,
   },
   {
-    name: '台湾',
+    name: '台湾省',
     flag: '🇹🇼',
     regex: /🇹🇼|台湾|台北|高雄|(?<![A-Za-z])TWN?(?![A-Za-z])|taiwan/i,
     icon: `${iconBaseUrl}Taiwan.svg`,
@@ -329,8 +334,23 @@ const urlTestBaseOption = {
   ...groupBaseOption,
   type: 'url-test',
   tolerance: 50,
+  interval: 180,
+  timeout: 3000,
+  'max-failed-times': 3,
   'exclude-type': 'DIRECT',
   icon: `${iconBaseUrl}Auto.svg`,
+  hidden: true,
+};
+
+const fallbackBaseOption = {
+  ...groupBaseOption,
+  type: 'fallback',
+  interval: 10,
+  timeout: 3000,
+  'max-failed-times': 3,
+  lazy: true,
+  'exclude-type': 'DIRECT',
+  icon: 'https://fastly.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Available_1.png',
   hidden: true,
 };
 
@@ -625,13 +645,13 @@ const serviceConfigs = [
     providers: {
       emby: {
         ...ruleProviderCommonDomain,
-        url: 'https://cdn.jsdmirror.com/gh/666OS/rules@release/mihomo/domain/Emby.mrs',
+        url: 'https://fastly.jsdelivr.net/gh/666OS/rules@release/mihomo/domain/Emby.mrs',
         path: './ruleset/emby.mrs',
         'path-in-bundle': 'geo/geosite/category-emby.mrs',
       },
       emos: {
         ...ruleProviderCommonDomain,
-        url: 'https://cdn.jsdmirror.com/gh/binaryu/emos-proxy-rule@main/rules/emos-mihomo.mrs',
+        url: 'https://fastly.jsdelivr.net/gh/binaryu/emos-proxy-rule@main/rules/emos-mihomo.mrs',
         path: './ruleset/emos.mrs',
         'path-in-bundle': 'geo/geosite/category-emby.mrs',
       },
@@ -916,36 +936,132 @@ function filterAndNormalizeProxies(config) {
 /**
  * 构建地区策略组，可附带自动选择组
  */
-function createRegionGroup(name, icon, proxies) {
-  const generateRegionAutoSelectEnabled = ruleOptionsEnable.生成地区自动选择组;
-  const hideManualSelectGroupEnabled = ruleOptionsEnable.隐藏地区手动选择组;
+//function createRegionGroup(name, icon, proxies) {
+//  const generateRegionAutoSelectEnabled = ruleOptionsEnable.生成地区自动选择组;
+//  const hideManualSelectGroupEnabled = ruleOptionsEnable.隐藏地区手动选择组;
+
+//  if (generateRegionAutoSelectEnabled) {
+//    const urlTestName = `${name}-自动选择`;
+//    return [
+//      {
+//        ...urlTestBaseOption,
+//        name: urlTestName,
+//        proxies,
+//      },
+//      {
+//        ...selectBaseOption,
+//        name,
+//        icon,
+//        proxies: [...proxies, urlTestName],
+//        hidden: hideManualSelectGroupEnabled,
+//      },
+//    ];
+//  }
+//  return [
+//    {
+//      ...selectBaseOption,
+//      name,
+//      icon,
+//      proxies,
+//      hidden: hideManualSelectGroupEnabled,
+//    },
+//  ];
+//}
+
+/**
+ * 构建地区策略组
+ *
+ * 结构：
+ * 地区
+ * ├─ 地区-自动选择
+ * ├─ 地区-故障转移
+ * └─ 地区节点
+ *
+ * 自动选择与故障转移相互独立：
+ * - 自动选择：只负责从当前地区节点中选择延迟较低的节点
+ * - 故障转移：只负责在当前地区节点发生故障时自动切换
+ *
+ * enableFallback=true 时，仅对实际地区组生成独立 Fallback。
+ */
+function createRegionGroup(name, icon, proxies, enableFallback = true) {
+  const generateRegionAutoSelectEnabled =
+    ruleOptionsEnable.生成地区自动选择组;
+
+  const hideManualSelectGroupEnabled =
+    ruleOptionsEnable.隐藏地区手动选择组;
+
+  // 防止空节点组生成无意义的策略组
+  if (!proxies || proxies.length === 0) {
+    return [];
+  }
+
+  // 当前地区是否启用 Fallback
+  const fallbackEnabled =
+    ruleOptionsEnable.故障转移 &&
+    enableFallback &&
+    proxies.length > 0;
+
+  const fallbackName = `${name}-故障转移`;
+
+  // 独立的地区 Fallback
+  const fallbackGroup = fallbackEnabled
+    ? {
+        ...fallbackBaseOption,
+        name: fallbackName,
+        proxies: [...proxies],
+      }
+    : null;
+
+  const groups = [];
+
+  // --------------------------------------------------
+  // 1. Fallback
+  // --------------------------------------------------
+  if (fallbackGroup) {
+    groups.push(fallbackGroup);
+  }
+
+  // --------------------------------------------------
+  // 2. 自动选择
+  // --------------------------------------------------
+  let urlTestName = null;
 
   if (generateRegionAutoSelectEnabled) {
-    const urlTestName = `${name}-自动选择`;
-    return [
-      {
-        ...urlTestBaseOption,
-        name: urlTestName,
-        proxies,
-      },
-      {
-        ...selectBaseOption,
-        name,
-        icon,
-        proxies: [...proxies, urlTestName],
-        hidden: hideManualSelectGroupEnabled,
-      },
-    ];
+    urlTestName = `${name}-自动选择`;
+
+    groups.push({
+      ...urlTestBaseOption,
+      name: urlTestName,
+
+      // 自动选择只测试真实节点
+      // 不把 Fallback 自身加入候选
+      proxies: [...proxies],
+    });
   }
-  return [
-    {
-      ...selectBaseOption,
-      name,
-      icon,
-      proxies,
-      hidden: hideManualSelectGroupEnabled,
-    },
+
+  // --------------------------------------------------
+  // 3. 地区手动选择组
+  // --------------------------------------------------
+  const manualProxies = [
+    // 自动选择放最前面
+    ...(urlTestName ? [urlTestName] : []),
+
+    // Fallback 放第二位
+    ...(fallbackGroup ? [fallbackName] : []),
+
+    // 最后才是实际节点
+    ...proxies,
   ];
+
+  groups.push({
+    ...selectBaseOption,
+    name,
+    icon,
+    proxies: manualProxies,
+    hidden: hideManualSelectGroupEnabled,
+  });
+
+  return groups;
 }
 
 /**
@@ -989,7 +1105,12 @@ function buildRegionGroups(filteredProxies, customProxies) {
  * 自定义节点不参与订阅节点过滤，也不参与 hosts 改写及 DNS 域名处理。
  */
 function buildCustomizeGroups(filteredProxies, customizeList = customizeProxies) {
+  const chainEnabled = ruleOptionsEnable.链式代理;
+
   if (!customizeList.length) {
+    if (chainEnabled) {
+      throw new Error('启用失败，请在脚本中添加自定义节点后尝试');
+    }
     return { customProxies: [], customProxyNames: [], customGroup: null };
   }
 
@@ -1005,14 +1126,18 @@ function buildCustomizeGroups(filteredProxies, customizeList = customizeProxies)
     }
     usedNames.add(name);
 
-    customProxies.push(name === normalized.name ? normalized : { ...normalized, name });
+    let customProxy = name === normalized.name ? normalized : { ...normalized, name };
+    if (chainEnabled && customProxy['dialer-proxy'] !== dialerProxyName) {
+      customProxy = { ...customProxy, 'dialer-proxy': dialerProxyName };
+    }
+    customProxies.push(customProxy);
   }
 
   const customProxyNames = customProxies.map((p) => p.name);
 
   const customGroup = {
     ...selectBaseOption,
-    name: '自建节点',
+    name: chainEnabled ? '链式落地' : '自建节点',
     proxies: customProxyNames,
     icon: `${iconBaseUrl}Server.svg`,
   };
@@ -1033,6 +1158,7 @@ function buildFunctionalGroups(filteredProxies, generatedRegionGroups, customize
   const minimalModeEnabled = ruleOptionsEnable.极简模式;
   const blockForeignQuicEnabled = ruleOptionsEnable.屏蔽国外QUIC;
   const addAllNodesToServiceGroupsEnabled = ruleOptionsEnable.分流组添加所有节点;
+  const chainEnabled = ruleOptionsEnable.链式代理;
   const hideManualSelectGroupEnabled = ruleOptionsEnable.隐藏地区手动选择组;
 
   const functionalGroups = [];
@@ -1049,14 +1175,55 @@ function buildFunctionalGroups(filteredProxies, generatedRegionGroups, customize
   const groupNamesOfSelect = generatedRegionGroups.filter((g) => g.type === 'select').map((g) => g.name);
   const baseGroupNames = baseGroups.filter((g) => ruleOptionsEnable[g.name]).map((g) => g.name);
   const customGroupNames = customGroup ? [customGroup.name] : [];
+  // 默认代理的全局故障转移
+  const defaultFallbackEnabled = ruleOptionsEnable.故障转移 && allProxiesNames.length > 0;
+  const defaultFallbackName = '默认代理-故障转移';
+  const defaultFallbackGroup = defaultFallbackEnabled ? { ...fallbackBaseOption, name: defaultFallbackName, proxies: [...allProxiesNames], } : null;
+
+  const chainGroup =
+    chainEnabled && customGroup
+      ? {
+          ...selectBaseOption,
+          name: dialerProxyName,
+          proxies: filteredProxyNames,
+          icon: `${iconBaseUrl}Bypass.svg`,
+        }
+      : null;
 
   if (minimalModeEnabled) {
-    const defaultGroup = {
-      ...selectBaseOption,
-      name: '默认代理',
-      proxies: allProxiesNames,
-      icon: `${iconBaseUrl}Proxy.svg`,
-    };
+    const defaultAutoSelectName = '默认代理-自动选择';
+  const defaultFallbackName = '默认代理-故障转移';
+
+  const defaultAutoSelectGroup =
+    ruleOptionsEnable.自动选择 && allProxiesNames.length > 0
+      ? {
+          ...urlTestBaseOption,
+          name: defaultAutoSelectName,
+          proxies: [...allProxiesNames],
+        }
+      : null;
+
+  const defaultFallbackGroup =
+    ruleOptionsEnable.故障转移 && allProxiesNames.length > 0
+      ? {
+          ...fallbackBaseOption,
+          name: defaultFallbackName,
+          proxies: [...allProxiesNames],
+        }
+      : null;
+
+  const defaultGroup = {
+    ...selectBaseOption,
+    name: '默认代理',
+    proxies: [
+      ...(defaultAutoSelectGroup ? [defaultAutoSelectName] : []),
+      ...(defaultFallbackGroup ? [defaultFallbackName] : []),
+      ...allProxiesNames,
+    ],
+    icon: `${iconBaseUrl}Proxy.svg`,
+  };
+
+    
     const finalRuleProviders = { ...baseRuleProviders };
     if (!blockForeignQuicEnabled) delete finalRuleProviders.cn_additional;
     const directGroup = {
@@ -1069,24 +1236,40 @@ function buildFunctionalGroups(filteredProxies, generatedRegionGroups, customize
     const globalGroup = {
       ...selectBaseOption,
       name: 'GLOBAL',
-      proxies: ['默认代理', ...customGroupNames, '直连'],
+      proxies: ['默认代理', ...customGroupNames, ...(chainGroup ? [chainGroup.name] : []), '直连'],
       icon: `${iconBaseUrl}Global.svg`,
     };
-    return {
-      globalGroup,
-      functionalGroups: [defaultGroup],
-      functionalRules: [],
-      finalRuleProviders,
-      directGroup,
-    };
+   return {
+    globalGroup,
+    functionalGroups: [
+      ...(defaultAutoSelectGroup ? [defaultAutoSelectGroup] : []),
+      ...(defaultFallbackGroup ? [defaultFallbackGroup] : []),
+      defaultGroup,
+    ],
+    functionalRules: [],
+    finalRuleProviders,
+    chainGroup,
+    directGroup,
+  };
   }
 
-  functionalGroups.push({
-    ...selectBaseOption,
-    name: '默认代理',
-    proxies: [...groupNamesOfSelect, ...baseGroupNames, ...customGroupNames],
-    icon: `${iconBaseUrl}Proxy.svg`,
-  });
+  // 全局故障转移组
+ if (defaultFallbackGroup) {
+   functionalGroups.push(defaultFallbackGroup);
+ }
+
+  // 默认代理
+functionalGroups.push({
+  ...selectBaseOption,
+  name: '默认代理',
+  proxies: [
+    ...(defaultFallbackGroup ? [defaultFallbackName] : []),
+    ...groupNamesOfSelect,
+    ...baseGroupNames,
+    ...customGroupNames,
+  ],
+  icon: `${iconBaseUrl}Proxy.svg`,
+});
 
   const orderedServiceConfigs = [
     ...serviceConfigs.filter((svc) => svc.name === 'AdBlock'),
@@ -1152,13 +1335,14 @@ function buildFunctionalGroups(filteredProxies, generatedRegionGroups, customize
     proxies: [
       ...functionalGroups.map((g) => g.name),
       ...customGroupNames,
+      ...(chainGroup ? [chainGroup.name] : []),
       directGroup.name,
       ...generatedRegionGroups.map((g) => g.name),
     ],
     icon: `${iconBaseUrl}Global.svg`,
   };
 
-  return { globalGroup, functionalGroups, functionalRules, finalRuleProviders, directGroup };
+  return { globalGroup, functionalGroups, functionalRules, finalRuleProviders, chainGroup, directGroup };
 }
 
 // ---dns和hosts相关处理---
@@ -1577,11 +1761,8 @@ function main(config) {
 
   const generatedRegionGroups = ruleOptionsEnable.极简模式 ? [] : buildRegionGroups(filteredProxies, customProxies);
 
-  const { globalGroup, functionalGroups, functionalRules, finalRuleProviders, directGroup } = buildFunctionalGroups(
-    filteredProxies,
-    generatedRegionGroups,
-    { customProxyNames, customGroup },
-  );
+  const { globalGroup, functionalGroups, functionalRules, finalRuleProviders, chainGroup, directGroup } =
+    buildFunctionalGroups(filteredProxies, generatedRegionGroups, { customProxyNames, customGroup });
 
   const { dns, hosts, proxies: mappedProxies } = buildDnsAndHostsConfig(config, filteredProxies);
 
@@ -1630,6 +1811,7 @@ function main(config) {
     globalGroup,
     ...functionalGroups,
     ...(customGroup ? [customGroup] : []),
+    ...(chainGroup ? [chainGroup] : []),
     directGroup,
     ...generatedRegionGroups,
   ];
