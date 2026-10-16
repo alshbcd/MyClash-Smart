@@ -174,7 +174,7 @@ const regionDefinitions = [
     icon: `${iconBaseUrl}Singapore.svg`,
   },
   {
-    name: '台湾省',
+    name: '台湾',
     flag: '🇹🇼',
     regex: /🇹🇼|台湾|台北|高雄|(?<![A-Za-z])TWN?(?![A-Za-z])|taiwan/i,
     icon: `${iconBaseUrl}Taiwan.svg`,
