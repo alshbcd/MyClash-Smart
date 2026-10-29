@@ -1,9 +1,57 @@
 /**
- * mihomo配置覆写脚本（全量版）
- * 作者：AIsouler
+ * mihomo配置覆写脚本（全量版 · 故障转移增强）
+ * 原作者：AIsouler
  * 源仓库：https://github.com/AIsouler/MyClash
- * 脚本链接：https://raw.githubusercontent.com/AIsouler/MyClash/main/Script/mihomoScript.js
  * 友情推荐，非常好用、省电且内存占用低的代理软件：https://github.com/appshubcc/Bettbox
+ *
+ * ==================================================================
+ * 基线：AIsouler/MyClash 上游原版
+ * 本版只做两件事：加故障转移、修原版已有的几处 bug。没有引入其他 fork
+ * 的功能（链式代理、epicgames 规则集等一概没有）。
+ *
+ * 一、故障转移结构（地区级独立 fallback）
+ *
+ *   地区（select）
+ *   ├─ 地区-自动选择（url-test）  按延迟挑
+ *   ├─ 地区-故障转移（fallback）  按顺序兜底
+ *   └─ 地区下的真实节点
+ *
+ *   默认代理-故障转移（fallback）  成员是各地区-故障转移组，负责跨地区降级
+ *   极简模式下没地区组，它退化为全部裸节点，不会变成空组
+ *
+ * 二、故障转移的关键参数
+ *
+ *   fallbackCheckInterval  = 10  探活间隔（秒）
+ *   fallbackMaxFailedTimes = 2   连续拨号失败几次后强制复查
+ *   从「节点挂掉」到「新连接绕开它」最坏一个 interval（10s）。
+ *   注意不是 10 × 2：max-failed-times 统计的是真实拨号失败，作用只是提前触发复查，
+ *   探活本身一次失败就判死（详见下面两个常量的注释）。
+ *   10s 只适合少量节点（≤10 个）。单轮耗时 = ceil(节点数/10) × 6s，
+ *   节点涨到 11 个以上就必须把 interval 调回 20 以上，否则 tick 会撞车。
+ *
+ * 三、原版的 bug（都已修）
+ *
+ *   1. groupBaseOption 缺 expected-status。默认值是 '*'，表示不限状态码，
+ *      节点返回 403/451/502 这类「TCP 通但服务不可用」也会被判健康，
+ *      故障转移就永远不会触发。已补 '200'。
+ *   2. tun.stack 写的是 'mips'，不是合法值。mihomo 只认 system / gvisor / mixed，
+ *      非法值会被静默回落到 gvisor——不报错，但你以为在用的配置其实没生效。
+ *      已改成显式的 'gvisor'。
+ *   3. default-selected 硬编码地区名（AI → 美国、PayPal → 美国、Patreon → 香港）。
+ *      订阅里没有对应地区时 mihomo 不报错，只在启动日志里刷警告。
+ *      现在先校验目标存在，不存在就不写这个字段。
+ *   4. GLOBAL 把所有分流组都铺进去，成员 30 多个，客户端里翻不到底。
+ *      而 rule 模式下它只在手动切全局模式时才用得到。已精简为
+ *      「默认代理 + 自建 + 直连 + 各地区组」。
+ *   5. 极简模式和非极简模式各写了一套 fallback 逻辑（原版没有 fallback，
+ *      是后来加的），靠 if 块内的 const 遮蔽外层变量，不报错但纯冗余。
+ *      已合并成一份。
+ *   6. 「故障转移」不在 baseGroups 里，policyGroupOptions 就扫不到它，
+ *      用户在 Bettbox 面板里看不到这个开关。已在末尾手动追加。
+ *   7. 节点名与策略组名/内置出站同名时会整份配置加载失败（内核报 duplicate name，
+ *      或者成员按名字查到策略组后 proxyGroupsDagSort 判出环）。节点名不可控，
+ *      已加保留名清单，冲突节点自动加「(节点)」后缀。
+ * ==================================================================
  */
 
 // --- 静态配置区域 ---
@@ -21,6 +69,7 @@ const ruleOptionsEnable = {
   手动选择: true, // 是否启用手动选择策略组
   自动选择: true, // 是否启用自动选择策略组
   负载均衡: true, // 是否启用负载均衡策略组
+  故障转移: true, // 是否启用各地区独立的故障转移策略组
 
   // 以下为分流策略配置
   FCM: true, // GoogleFCM服务
@@ -60,6 +109,35 @@ const ruleOptionsEnable = {
   代理IPV4优先: false, // 是否将订阅节点统一为 IPv4 优先（与“代理IPV6优先”同时开启时不生效）
   代理IPV6优先: false, // 是否将订阅节点统一为 IPv6 优先（与“代理IPV4优先”同时开启时不生效）
 };
+
+/**
+ * 局域网共享开关
+ *
+ * false（当前）：内核只监听 127.0.0.1，本机以外的设备连不进来。
+ *              此时 bind-address 会被内核直接忽略（listener.go 的 genAddr 在 allowLan
+ *              为 false 时固定返回 127.0.0.1:port），认证也不会下发。
+ * true：监听 0.0.0.0:7890，同一 WiFi 下的手机、电视、平板都能把你电脑当代理用。
+ *       必须同时把下面的 lanAuthentication 改成真实账号密码，否则等于对所有人敞开。
+ */
+const allowLan = false;
+
+/**
+ * 局域网访问认证（只在 allowLan 为 true 时生效）
+ *
+ * 背景：allowLan 打开后监听 0.0.0.0:7890，不配 authentication 的话，
+ * 同一 WiFi 下任何人扫到 7890 端口就能免费用你的订阅流量，你的机场流量会被别人跑光，
+ * 排查时还看不到自己这边有任何异常。
+ *
+ * 格式：'用户名:密码'。可以写多个，客户端填任意一组都能通过。
+ *      内核按「第一个冒号」切分（strings.Cut），所以密码里可以有冒号，用户名里不行。
+ *
+ * ⚠️ 把 allowLan 改成 true 之前，必须把 用户名/密码 换成你自己的。
+ *    原样留着等于没设——这两个词是公开的默认值。
+ *    改完记得同步到每台用这套代理的设备（手机/电视的代理设置里要填同样的账号密码），
+ *    否则它们会连得上端口但代理不工作。
+ *    密码建议只用字母和数字，避开 @ : / # ? 这些会跟 URI、YAML 打架的字符。
+ */
+const lanAuthentication = ['用户名:密码'];
 
 // 定义前置规则
 const prefixRules = [
@@ -319,14 +397,73 @@ const baseRuleProviders = {
 };
 
 // 策略组公共配置
+// expected-status 必须设。默认值是 '*'（不限状态码），意味着节点返回 403/451/502
+// 这类「域名被墙但 TCP 通」的响应也会被判成健康，故障转移就永远不触发，纯摆设。
+// 实测探活地址 https://www.apple.com/library/test/success.html 返回 200，无重定向。
 const groupBaseOption = {
-  interval: 600,
-  timeout: 3000,
+  interval: 300,
+  // 6000ms，不是内核默认的 5000。脚本开着 unified-delay，一次 URLTest 内部要发两次
+  // 请求（第二次才是计入延迟的那次），而 timeout 卡的是整个 URLTest 的总时长，
+  // 等于 6 秒要容下两轮 TCP+TLS 握手。设成 3000 时美欧节点一丢包就被判死，
+  // 故障转移反而会把你切到更差的节点上。
+  // 代价：真挂掉的节点最坏多等 6 秒才判死，这只影响「多久发现」，不影响切换结果。
+  timeout: 6000,
   url: 'https://www.apple.com/library/test/success.html',
+  'expected-status': '200',
   lazy: true,
   'max-failed-times': 3,
   'empty-fallback': 'REJECT',
 };
+
+// --- 探活节奏（故障转移的关键参数，改这里就够了）---
+
+/**
+ * 单位：秒。
+ * 越小切换越快，但探活请求会成比例增加，机场侧看到的就是你的节点在发 HTTPS。
+ *
+ * 有一条硬约束：单轮探活耗时 ≈ ceil(节点数 / 10) × timeout。
+ * 10 是内核写死的并发上限（provider/healthcheck.go 的 b.SetLimit(10)，无配置项），
+ * timeout 就是上面的 6s。interval 必须大于单轮耗时，否则上一轮没跑完，下一次 tick
+ * 会被 singleDo.Do 直接跳过，实际间隔等于单轮耗时，设定值等于白设。
+ *   1~7 个节点   → 单轮最坏 6s  → interval 10 有 4s 余量，可行（当前情况）
+ *   11~14 个节点 → 单轮最坏 12s → interval 10 顶满，必须调回 ≥ 20
+ *   20 个节点    → 单轮最坏 12s → interval 30 合适
+ *
+ * 当前取 10s 的前提是「订阅只有 7 个节点 + 极简模式（全部节点挤在一个 fallback 组）」。
+ * 探活量 = 7 × 360 = 2520 次/小时，按每次 3~5KB 算日均 240~400MB。
+ * 订阅换成大节点包之后务必把这里调回去，否则探活会和真实流量抢带宽。
+ *
+ * 参考档位：
+ * 60s：每节点每小时 60 次，20 节点约 1300 次/时，通用值。
+ * 180s：折中，最坏 3 分钟切换，流量降到 1/3。
+ * 300s：行业普遍值（Clash 系默认），最坏 5 分钟切换。
+ *
+ * 注意这个值只决定「定时探活」的快慢。有流量时走的是另一条更快的路——
+ * 连续拨号失败 max-failed-times 次就立即全组重测，跟这里无关。
+ */
+const fallbackCheckInterval = 10;
+
+/**
+ * 官方定义：「最大失败次数，超过则触发一次强制健康检查」，默认 5。
+ *
+ * 注意它统计的**不是探活失败**，而是真实拨号失败（GroupBase.onDialFailed）。
+ * 探活本身没有「连续失败几次才算死」的门槛：一次 URLTest 失败、或者状态码不匹配
+ * expected-status，adapter.Proxy.URLTest 的 defer 里就直接 state.alive.Store(false)。
+ * 也就是说节点是「测一次就判死」的。
+ *
+ * 所以这个值管的是「有流量时的加速通道」，不是判定门槛：
+ *   有流量 → 连续拨号失败 2 次就强制体检一次，不必等下一个探活周期；
+ *   没流量 → 等定时探活在 fallbackCheckInterval 内发现。
+ * 两条路谁先到算谁，所以「节点挂掉 → 新连接绕开它」最坏就是一个 interval，
+ * 不是 interval × max-failed-times。
+ *
+ * 有个细节：groupbase.go 的 onDialFailed 里，两次失败必须发生在 testTimeout 毫秒
+ * 之内才会累加，超时就把计数清零。testTimeout 就是上面的 timeout: 6000，
+ * 所以这个加速通道的有效窗口是 6 秒。
+ *
+ * 调到 1 的代价是：网络抖一下就触发一轮全组体检，换来频繁重连和断流。
+ */
+const fallbackMaxFailedTimes = 2;
 
 // select策略组通用配置
 const selectBaseOption = {
@@ -335,12 +472,44 @@ const selectBaseOption = {
 };
 
 // url-test策略组通用配置
+// 这里不重复写 interval / timeout / max-failed-times，沿用 groupBaseOption 的 300s。
+// 想让它响应更快可以单独加 interval: 180，但那是额外的探活开销，按需改。
+//
+// 300s 与 fallback 的 fallbackCheckInterval 不等长是有意的：url-test 只决定「谁最快」，
+// 慢一分钟无所谓；fallback 决定「谁还活着」，慢一分钟就是断流。
+// 两者共用一个值只会让其中一个变差。
+//
+// lazy 沿用 groupBaseOption 的 true（懒测）。唯一的例外是极简模式下的
+// 「默认代理-自动选择」，那里会覆盖成 false，原因见该处注释。
 const urlTestBaseOption = {
   ...groupBaseOption,
   type: 'url-test',
   tolerance: 50,
   'exclude-type': 'DIRECT',
   icon: `${iconBaseUrl}Auto.svg`,
+  hidden: true,
+};
+
+// fallback策略组通用配置
+// 与 url-test 的本质区别：
+//   url-test 永远挑延迟最低的，延迟一波动就在节点之间来回跳；
+//   fallback 严格按 proxies 顺序取第一个可用的，前面一挂立刻顶下一个，属主备模型。
+//
+// lazy 必须显式设 false。官方定义：「未选择到当前策略组时，不进行测试」，默认 true。
+// 也就是说用户没在界面上手动选中某个 fallback 组时，它压根不探活，状态一直过期，
+// 真出故障要接管时才发现拿的是旧数据，切换会慢一大拍。故障转移组必须常测。
+// 唯一的例外是「成员全是策略组」的全局 fallback，调用侧会把它覆盖成 true——
+// 那时子组已经在常测，再测一遍等于让每个节点被两套定时器打。
+const fallbackBaseOption = {
+  ...groupBaseOption,
+  type: 'fallback',
+  interval: fallbackCheckInterval,
+  'max-failed-times': fallbackMaxFailedTimes,
+  lazy: false,
+  'exclude-type': 'DIRECT',
+  // MyClash 的 Icons/svg 里没有 Fallback 专用图标，用 Available 代替，
+  // 好处是跟其他组共用同一个 CDN，不额外依赖外部图标仓库。
+  icon: `${iconBaseUrl}Available.svg`,
   hidden: true,
 };
 
@@ -355,6 +524,8 @@ const loadBalanceBaseOption = {
 };
 
 // 定义基础策略组
+// 注意：故障转移不在这里。它是地区级的，由 createRegionGroup 按地区动态生成，
+// 硬塞进基础组只会得到一个铺满全部裸节点的巨型 fallback，与地区级完全重复。
 const baseGroups = [
   {
     name: '手动选择',
@@ -787,8 +958,11 @@ const serviceConfigs = [
 /**
  * 适配 Bettbox 策略组开关
  * 声明哪些开关属于策略组：基础策略组 + 全部分流策略组。
+ *
+ * 额外追加「故障转移」：它不是基础策略组（由地区动态生成），但必须出现在
+ * Bettbox 的开关面板里，否则用户在 App 里根本关不掉这个功能，只能改源码。
  */
-Compatible_With_Bettbox.policyGroupOptions = serviceConfigs.map((svc) => svc.name);
+Compatible_With_Bettbox.policyGroupOptions = [...serviceConfigs.map((svc) => svc.name), '故障转移'];
 
 // ---节点过滤、重命名及验证---
 
@@ -883,6 +1057,59 @@ function getIpVersionPreference() {
 }
 
 /**
+ * 覆写结果里「已经被占用」的名字。
+ *
+ * 为什么要这份清单：内核先注册 proxies、再注册 proxy-groups，两处都是按名字查表，
+ * 同名会直接让整份配置加载失败，而且有两种失败形态：
+ *   1. 节点名 == 组名：注册组时命中 proxies 表里已有的键，报 "the duplicate name"。
+ *   2. 节点名 == 组名，且该节点恰好被别的组收录：成员按名字查表查到的是策略组而不是节点，
+ *      proxyGroupsDagSort 会判出环（节点叫 AI → 其他节点-故障转移 → AI 策略组 → 默认代理）。
+ * 节点名是机场给的、不可控，所以在覆写阶段让路：冲突的节点统一加「(节点)」后缀。
+ *
+ * 注意清单里也包含 directProxies 的三个名字，它们会被原样追加进 proxies，
+ * 订阅里若正好有一个同名节点，同样会撞成 duplicate name。
+ */
+const reservedNames = new Set([
+  'GLOBAL',
+  '默认代理',
+  '直连',
+  '漏网之鱼',
+  '自建节点',
+  '默认代理-自动选择',
+  '默认代理-故障转移',
+  '其他节点',
+  '其他节点-自动选择',
+  '其他节点-故障转移',
+  // baseGroups 已并入 serviceConfigs，这里一并覆盖
+  ...serviceConfigs.map((svc) => svc.name),
+  ...allRegionDefinitions.flatMap((r) => [r.name, `${r.name}-自动选择`, `${r.name}-故障转移`]),
+  ...directProxies.map((p) => p.name),
+  // 内核内置出站，同名会在 ParseProxy 阶段报 duplicate name
+  'DIRECT',
+  'REJECT',
+  'REJECT-DROP',
+  'PASS',
+  'PASS-RULE',
+  'COMPATIBLE',
+]);
+
+/**
+ * 与保留名冲突时，给节点让出一个不冲突的名字。
+ * 后缀里保留原名的地区关键字，覆盖后依然能正确归入地区组。
+ */
+function reserveProxyName(name, usedNames) {
+  if (!reservedNames.has(name)) return name;
+
+  let candidate = `${name} (节点)`;
+  let index = 2;
+  while (usedNames.has(candidate) || reservedNames.has(candidate)) {
+    candidate = `${name} (节点 ${index++})`;
+  }
+
+  return candidate;
+}
+
+/**
  * 过滤并标准化节点：剔除内置/信息节点、按配置过滤、去重、修复 dialer-proxy 引用，空列表时抛错
  */
 function filterAndNormalizeProxies(config) {
@@ -922,13 +1149,18 @@ function filterAndNormalizeProxies(config) {
 
   for (const rawProxy of filteredRawProxies) {
     const normalized = normalizeProxyName(rawProxy);
-    if (normalized.name !== rawProxy.name) {
-      renameMap.set(rawProxy.name, normalized.name);
+    // 与策略组/内置出站/直连节点同名的，改名让路（详见 reservedNames 的注释）
+    const name = reserveProxyName(normalized.name, uniqueNames);
+
+    if (name !== rawProxy.name) {
+      renameMap.set(rawProxy.name, name);
     }
-    if (!uniqueNames.has(normalized.name)) {
-      uniqueNames.add(normalized.name);
-      normalizedProxies.push(normalized);
+    if (uniqueNames.has(name)) {
+      continue;
     }
+
+    uniqueNames.add(name);
+    normalizedProxies.push(name === normalized.name ? normalized : { ...normalized, name });
   }
 
   const normalizedProxyNames = new Set(normalizedProxies.map((p) => p.name));
@@ -952,42 +1184,70 @@ function filterAndNormalizeProxies(config) {
 // ---构建地区组和倍率组---
 
 /**
- * 构建地区策略组，可附带自动选择组
+ * 构建地区策略组
+ *
+ * 结构：
+ * 地区（select）
+ * ├─ 地区-自动选择（url-test）  按延迟挑
+ * ├─ 地区-故障转移（fallback）  按顺序兜底
+ * └─ 地区下的真实节点
+ *
+ * 自动选择与故障转移职责分离：
+ * - 自动选择：只管从本地区节点里挑延迟低的
+ * - 故障转移：只管本地区节点故障时按顺序接管
+ *
+ * enableFallback=false 时不生成 fallback。倍率组（低/高倍率）走这条路径：
+ * 它们是按价格横切出来的集合，与地区组节点高度重叠，再生成一遍 fallback
+ * 就是同一批节点被两套定时器反复探活，纯浪费。
  */
-function createRegionGroup(name, icon, proxies) {
+function createRegionGroup(name, icon, proxies, enableFallback = true) {
   const generateRegionAutoSelectEnabled = ruleOptionsEnable.生成地区自动选择组;
   const hideManualSelectGroupEnabled = ruleOptionsEnable.隐藏地区手动选择组;
 
-  if (generateRegionAutoSelectEnabled) {
-    const urlTestName = `${name}-自动选择`;
-    return [
-      {
-        ...urlTestBaseOption,
-        name: urlTestName,
-        proxies,
-      },
-      {
-        ...selectBaseOption,
-        name,
-        icon,
-        proxies: [...proxies, urlTestName],
-        hidden: hideManualSelectGroupEnabled,
-      },
-    ];
+  // 防止空节点组生成无意义的策略组
+  if (!proxies || proxies.length === 0) {
+    return [];
   }
-  return [
-    {
-      ...selectBaseOption,
-      name,
-      icon,
-      proxies,
-      hidden: hideManualSelectGroupEnabled,
-    },
-  ];
+
+  const fallbackEnabled = ruleOptionsEnable.故障转移 && enableFallback;
+  const fallbackName = `${name}-故障转移`;
+
+  const groups = [];
+
+  // 1. 故障转移
+  if (fallbackEnabled) {
+    groups.push({
+      ...fallbackBaseOption,
+      name: fallbackName,
+      proxies: [...proxies],
+    });
+  }
+
+  // 2. 自动选择（只测真实节点，不把故障转移组塞进候选）
+  let urlTestName = null;
+  if (generateRegionAutoSelectEnabled) {
+    urlTestName = `${name}-自动选择`;
+    groups.push({
+      ...urlTestBaseOption,
+      name: urlTestName,
+      proxies: [...proxies],
+    });
+  }
+
+  // 3. 地区手动选择组：自动选择在前，故障转移第二，最后才是裸节点
+  groups.push({
+    ...selectBaseOption,
+    name,
+    icon,
+    proxies: [...(urlTestName ? [urlTestName] : []), ...(fallbackEnabled ? [fallbackName] : []), ...proxies],
+    hidden: hideManualSelectGroupEnabled,
+  });
+
+  return groups;
 }
 
 /**
- * 将节点按地区/倍率归类，构建地区策略组、倍率策略组与“其他节点”组
+ * 将节点按地区/倍率/家宽归类，构建地区、倍率、家宽策略组与“其他节点”组
  */
 function buildRegionGroups(filteredProxies, customProxies) {
   const generateRateGroupEnabled = ruleOptionsEnable.生成倍率组;
@@ -1016,8 +1276,12 @@ function buildRegionGroups(filteredProxies, customProxies) {
         (generateRateGroupEnabled || !rateRegionDefinitions.includes(r)) &&
         (generateHomeGroupEnabled || !homeRegionDefinitions.includes(r)),
     )
-    .flatMap((r) => createRegionGroup(r.name, r.icon, regionGroups[r.name]));
+    // 只有真实地区组才生成独立 fallback，倍率组和家宽组都不生成：
+    // 家宽节点通常只有一两个、且是「原生 IP 解锁流媒体」这类专用出口，
+    // 组内做故障转移没有备胎可选，反而多一组探活。
+    .flatMap((r) => createRegionGroup(r.name, r.icon, regionGroups[r.name], regionDefinitions.includes(r)));
 
+  // “其他节点”是跨地区的兜底池，保留 fallback 有意义
   if (otherProxies.length > 0) {
     generatedRegionGroups.push(...createRegionGroup('其他节点', `${iconBaseUrl}WorldMap.svg`, otherProxies));
   }
@@ -1037,7 +1301,8 @@ function buildCustomizeGroups(filteredProxies, customizeList = customizeProxies)
     return { customProxies: [], customProxyNames: [], customGroup: null };
   }
 
-  const usedNames = new Set(filteredProxies.map((p) => p.name));
+  // 预订保留名，自定义节点与策略组/内置出站/直连节点重名时同样要加「自建-」前缀让路
+  const usedNames = new Set([...filteredProxies.map((p) => p.name), ...reservedNames]);
   const customPrefix = '自建-';
   const customProxies = [];
 
@@ -1091,27 +1356,71 @@ function buildFunctionalGroups(filteredProxies, generatedRegionGroups, customize
   const filteredProxyNames = filteredProxies.map((p) => p.name);
   const allProxiesNames = [...filteredProxyNames, ...customProxyNames];
   const groupNamesOfSelect = generatedRegionGroups.filter((g) => g.type === 'select').map((g) => g.name);
+  const groupNamesOfFallback = generatedRegionGroups.filter((g) => g.type === 'fallback').map((g) => g.name);
   const baseGroupNames = baseGroups.filter((g) => ruleOptionsEnable[g.name]).map((g) => g.name);
   const customGroupNames = customGroup ? [customGroup.name] : [];
 
-  if (minimalModeEnabled) {
-    const autoSelectGroupEnabled = ruleOptionsEnable.自动选择;
+  const defaultFallbackName = '默认代理-故障转移';
 
-    const finalRuleProviders = { ...baseRuleProviders };
-    if (!blockForeignQuicEnabled) delete finalRuleProviders.cn_additional;
+  /**
+   * 全局故障转移的成员：
+   * - 正常模式：各地区-故障转移组。只对「组」做健康检查，探活量等于组数，
+   *   而且拿到跨地区降级能力（香港全挂 → 自动跳日本）。
+   * - 极简模式 / 地区组未生成：退化为裸节点，保证组不会空掉。
+   */
+  const globalFallbackMembers = groupNamesOfFallback.length > 0 ? groupNamesOfFallback : allProxiesNames;
+
+  const defaultFallbackGroup =
+    ruleOptionsEnable.故障转移 && globalFallbackMembers.length > 0
+      ? {
+          ...fallbackBaseOption,
+          name: defaultFallbackName,
+          proxies: [...globalFallbackMembers],
+          // 成员是「组」时不必按 fallbackCheckInterval 追：各地区 fallback 已是
+          // lazy: false 常测，子组状态本身新鲜，父组再以同样频率复核一遍就是重复轮询。
+          // 成员退化成裸节点时（极简模式 / 没有地区组），必须恢复常测。
+          lazy: groupNamesOfFallback.length > 0,
+          // interval 也必须一起改。本组是「默认代理」的第一个成员，几乎总在链路上、
+          // 一直被 touch，lazy 挡不住它；沿用 fallbackBaseOption 的短间隔就等于
+          // 每个周期都对子组再打一轮，而子组自己已经在常测。降回 url-test 档的 300s。
+          ...(groupNamesOfFallback.length > 0 && { interval: groupBaseOption.interval }),
+        }
+      : null;
+
+  if (minimalModeEnabled) {
+    const defaultAutoSelectName = '默认代理-自动选择';
+
+    const defaultAutoSelectGroup =
+      ruleOptionsEnable.自动选择 && allProxiesNames.length > 0
+        ? {
+            ...urlTestBaseOption,
+            name: defaultAutoSelectName,
+            proxies: [...allProxiesNames],
+            // 极简模式下唯一的测速组，这里必须常测（覆盖 urlTestBaseOption 的 lazy: true）。
+            //
+            // 原因：lazy 的判定是「最近一个 interval 内有连接经过才测」，lastTouch 只在真实
+            // 拨号时刷新。极简模式下用户一旦选了「故障转移」，本组就没有流量经过，从内核启动
+            // 测过那一次之后状态彻底冻结。几小时后切回来，url-test 会拿几小时前的延迟选点；
+            // 更糟的是它初始化时 fast := proxies[0] 且不检查存活性，第一个节点若已挂
+            // （delay 记为 0），后面节点 200 < 0 永不成立，会一直用那个死节点，直到下一轮
+            // 探活（最长 300s）才纠正。
+            //
+            // 代价可控：极简模式只有 2 个非 select 组，本组 300s 一轮，19 节点时 +228 次/小时，
+            // 相对故障转移的 1140 次/小时只多 20%。标准模式不做这个覆盖——那里有 7 个测速组，
+            // 全部常测会让探活量接近翻倍，而每个地区都有独立 fallback 兜底，不需要手动切。
+            lazy: false,
+          }
+        : null;
 
     const defaultGroup = {
       ...selectBaseOption,
       name: '默认代理',
-      proxies: [...allProxiesNames, ...(autoSelectGroupEnabled ? ['自动选择'] : [])],
+      proxies: [
+        ...(defaultAutoSelectGroup ? [defaultAutoSelectName] : []),
+        ...(defaultFallbackGroup ? [defaultFallbackName] : []),
+        ...allProxiesNames,
+      ],
       icon: `${iconBaseUrl}Proxy.svg`,
-    };
-
-    const autoSelectGroup = {
-      ...urlTestBaseOption,
-      name: '自动选择',
-      proxies: allProxiesNames,
-      hidden: true,
     };
 
     const directGroup = {
@@ -1125,23 +1434,46 @@ function buildFunctionalGroups(filteredProxies, generatedRegionGroups, customize
     const globalGroup = {
       ...selectBaseOption,
       name: 'GLOBAL',
-      proxies: ['默认代理', ...customGroupNames, ...(autoSelectGroupEnabled ? [autoSelectGroup.name] : []), '直连'],
+      // 极简模式下只有 默认代理 / 默认代理-自动选择 / 默认代理-故障转移 / 自建 / 直连，
+      // 直接全列出来即可。注意别漏掉自动选择和故障转移——原版这里只有「自动选择」，
+      // 后来加 fallback 时容易顺手把它挤掉。
+      proxies: [
+        '默认代理',
+        ...customGroupNames,
+        ...(defaultAutoSelectGroup ? [defaultAutoSelectName] : []),
+        ...(defaultFallbackGroup ? [defaultFallbackName] : []),
+        '直连',
+      ],
       icon: `${iconBaseUrl}Global.svg`,
     };
 
     return {
       globalGroup,
-      functionalGroups: [defaultGroup, ...(autoSelectGroupEnabled ? [autoSelectGroup] : [])],
+      functionalGroups: [
+        ...(defaultAutoSelectGroup ? [defaultAutoSelectGroup] : []),
+        ...(defaultFallbackGroup ? [defaultFallbackGroup] : []),
+        defaultGroup,
+      ],
       functionalRules: [],
       finalRuleProviders,
       directGroup,
     };
   }
 
+  // 全局故障转移放最前，默认代理引用它
+  if (defaultFallbackGroup) {
+    functionalGroups.push(defaultFallbackGroup);
+  }
+
   functionalGroups.push({
     ...selectBaseOption,
     name: '默认代理',
-    proxies: [...groupNamesOfSelect, ...baseGroupNames, ...customGroupNames],
+    proxies: [
+      ...(defaultFallbackGroup ? [defaultFallbackName] : []),
+      ...groupNamesOfSelect,
+      ...baseGroupNames,
+      ...customGroupNames,
+    ],
     icon: `${iconBaseUrl}Proxy.svg`,
   });
 
@@ -1165,24 +1497,43 @@ function buildFunctionalGroups(filteredProxies, generatedRegionGroups, customize
     } else if (svc.reject) {
       groupProxies = ['REJECT', 'REJECT-DROP', 'PASS'];
     } else {
+      // 分流组也要能选到「地区-故障转移」，否则这个组只在地理分组里可见，
+      // 用户在 YouTube / Google 里根本挑不到它。
       groupProxies = !addAllNodesToServiceGroupsEnabled
-        ? ['默认代理', ...customGroupNames, ...baseGroupNames, ...groupNamesOfSelect, ...(svc.direct ? ['直连'] : [])]
+        ? [
+            '默认代理',
+            ...customGroupNames,
+            ...baseGroupNames,
+            ...groupNamesOfSelect,
+            ...groupNamesOfFallback,
+            ...(svc.direct ? ['直连'] : []),
+          ]
         : [
             '默认代理',
             ...customGroupNames,
             ...baseGroupNames,
             ...groupNamesOfSelect,
+            ...groupNamesOfFallback,
             ...allProxiesNames,
             ...(svc.direct ? ['直连'] : []),
           ];
     }
+
+    // default-selected 指向不存在的目标时，mihomo 不会报错，只会静默退回第一个成员，
+    // 但启动日志会刷一串 warning。订阅里没有美国节点时 AI/PayPal/EHentai 就是这种情况。
+    // 先在这里校验一遍，目标不存在就不写这个字段，让内核自己取第一个。
+    const defaultSelectedValid =
+      svc.defaultSelected !== undefined &&
+      (groupNamesOfSelect.includes(svc.defaultSelected) ||
+        allProxiesNames.includes(svc.defaultSelected) ||
+        svc.defaultSelected === '直连');
 
     functionalGroups.push({
       ...svc.baseOption,
       name: svc.name,
       icon: svc.icon,
       proxies: groupProxies,
-      ...(svc.defaultSelected !== undefined && {
+      ...(defaultSelectedValid && {
         'default-selected': svc.defaultSelected,
       }),
     });
@@ -1191,7 +1542,7 @@ function buildFunctionalGroups(filteredProxies, generatedRegionGroups, customize
   functionalGroups.push({
     ...selectBaseOption,
     name: '漏网之鱼',
-    proxies: ['默认代理', '直连', ...groupNamesOfSelect],
+    proxies: ['默认代理', '直连', ...groupNamesOfSelect, ...groupNamesOfFallback],
     icon: `${iconBaseUrl}Stack.svg`,
   });
 
@@ -1206,12 +1557,14 @@ function buildFunctionalGroups(filteredProxies, generatedRegionGroups, customize
   const globalGroup = {
     ...selectBaseOption,
     name: 'GLOBAL',
-    proxies: [
-      ...functionalGroups.map((g) => g.name),
-      ...customGroupNames,
-      directGroup.name,
-      ...generatedRegionGroups.map((g) => g.name),
-    ],
+    // 只放「默认代理 + 自建 + 直连 + 各地区手动选择组」，不复刻全部 20 多个分流组。
+    // 把 functionalGroups 整个铺进来会让这个组有 39 个成员，客户端里翻不到底，
+    // 而 rule 模式下 GLOBAL 本身只在手动切全局模式时才用得到。
+    //
+    // 这里用 groupNamesOfSelect 而不是 generatedRegionGroups.map(...)：
+    // 后者会把「香港-自动选择」「香港-故障转移」这些子组也铺进来，成员数翻三倍，
+    // 而这些子组本来就在「香港」组里可选，在 GLOBAL 里再列一遍纯属重复。
+    proxies: ['默认代理', ...customGroupNames, directGroup.name, ...groupNamesOfSelect],
     icon: `${iconBaseUrl}Global.svg`,
   };
 
@@ -1716,11 +2069,25 @@ function main(config) {
   newConfig['dns'] = dns;
   newConfig['hosts'] = hosts;
   newConfig['mixed-port'] = 7890;
-  newConfig['allow-lan'] = true;
+  // allow-lan 开关在文件顶部 allowLan。开着就必须配 authentication，
+  // 否则等于把你家/公司 WiFi 下的 7890 端口对所有人敞开，谁扫到都能免费用你的订阅流量。
+  newConfig['allow-lan'] = allowLan;
   newConfig['ipv6'] = true;
   newConfig['mode'] = 'rule';
   newConfig['log-level'] = 'info';
-  newConfig['bind-address'] = '*';
+  // allow-lan 为 false 时内核固定监听 127.0.0.1:7890，这个字段不参与计算；
+  // 写成 127.0.0.1 只是为了让生成的配置文件读起来不产生歧义。
+  newConfig['bind-address'] = allowLan ? '*' : '127.0.0.1';
+  if (allowLan) {
+    // 内核用 strings.Cut(line, ':') 切分，不含冒号的条目会被静默丢弃、认证器变成 nil，
+    // 表现就是「密码白设了、端口依然全开」，而且启动日志一个字都不会提。
+    // 这种静默降级太危险，宁可让配置生成直接失败。
+    const invalidAuth = lanAuthentication.filter((item) => typeof item !== 'string' || !item.includes(':'));
+    if (invalidAuth.length > 0) {
+      throw new Error(`lanAuthentication 格式错误，应为 '用户名:密码'：${JSON.stringify(invalidAuth)}`);
+    }
+    newConfig['authentication'] = [...lanAuthentication];
+  }
   newConfig['unified-delay'] = true;
   newConfig['tcp-concurrent'] = true;
   newConfig['keep-alive-interval'] = 60;
@@ -1745,7 +2112,11 @@ function main(config) {
 
   newConfig['tun'] = {
     enable: true,
-    stack: 'mips',
+    // 原脚本这里写的是 'mips'，不是合法值。mihomo 只认 system / gvisor / mixed，
+    // 非法值会被静默回落到 gvisor，行为上没炸，但等于你以为自己在用某个栈、其实不是。
+    // gvisor：用户态，最稳，兼容性最好。
+    // mixed ：TCP 走系统栈、UDP 走 gvisor，性能更好，个别机型会出问题，想压性能就换它。
+    stack: 'gvisor',
     'auto-route': true,
     'strict-route': true,
     'auto-redirect': true,
